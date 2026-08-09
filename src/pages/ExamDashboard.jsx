@@ -1,10 +1,10 @@
-// src/pages/ExamDashboard.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UploadCloud, FileText, ChevronRight, Loader2, History, PlusCircle, X, Sparkles } from 'lucide-react';
+import { UploadCloud, FileText, ChevronRight, Loader2, History, PlusCircle, X, Sparkles, Download, Upload, TrendingUp } from 'lucide-react';
 import toast from 'react-hot-toast'; // الإشعارات
 import { supabase } from '../lib/supabase';
 import { callAzureAI, extractTextWithVisionModel } from '../lib/ai';
+import { saveFilesLocally, getFilesLocally, saveExamLocally } from '../lib/offlineDb';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
@@ -14,10 +14,11 @@ if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
 
 export default function ExamDashboard() {
   const navigate = useNavigate();
+  const jsonImportRef = useRef(null);
   const [files, setFiles] = useState([]);
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
-  const[uploadStatus, setUploadStatus] = useState('');
+  const [uploadStatus, setUploadStatus] = useState('');
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [pastExams, setPastExams] = useState([]);
@@ -36,27 +37,91 @@ export default function ExamDashboard() {
   const fetchFiles = async () => {
     try {
       setLoadingFiles(true);
+      if (!navigator.onLine) {
+        const localFiles = await getFilesLocally();
+        setFiles(localFiles || []);
+        return;
+      }
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { navigate('/auth'); return; }
 
       const { data, error } = await supabase.from('user_files').select('*').order('created_at', { ascending: false });
       if (error) throw error;
-      setFiles(data ||[]);
+      setFiles(data || []);
+      if (data && data.length > 0) {
+        saveFilesLocally(data);
+      }
     } catch (err) {
       console.error("Error fetching files:", err);
+      const localFiles = await getFilesLocally();
+      setFiles(localFiles || []);
     } finally {
       setLoadingFiles(false);
     }
   };
 
   const fetchPastExams = async (fileId) => {
-    const { data } = await supabase.from('exams').select('id, score, total_score, created_at, status').eq('file_id', fileId).order('created_at', { ascending: false });
-    setPastExams(data ||[]);
+    try {
+      const { data } = await supabase.from('exams').select('id, score, total_score, created_at, status, exam_data').eq('file_id', fileId).order('created_at', { ascending: false });
+      setPastExams(data || []);
+      if (data) {
+        data.forEach(ex => saveExamLocally(ex));
+      }
+    } catch (err) {
+      console.error("Error fetching past exams:", err);
+    }
   };
 
   const handleFileClick = (file) => {
     setSelectedFile(file);
     fetchPastExams(file.id);
+  };
+
+  const exportExamJson = async (examId, e) => {
+    e.stopPropagation();
+    try {
+      const { data } = await supabase.from('exams').select('*').eq('id', examId).single();
+      if (!data) return toast.error("لم يتم العثور على الاختبار للتصدير.");
+      const jsonStr = JSON.stringify(data.exam_data, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `exam_bank_${selectedFile?.file_name || 'edu'}_${examId.slice(0,6)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("تم تصدير بنك الأسئلة بصيغة JSON بنجاح!");
+    } catch (err) {
+      toast.error("فشل تصدير بنك الأسئلة.");
+    }
+  };
+
+  const importExamJson = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsedExamData = JSON.parse(text);
+      if (!parsedExamData.questions || !Array.isArray(parsedExamData.questions)) {
+        throw new Error("ملف JSON غير صالح أو لا يحتوي على بنك أسئلة.");
+      }
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data, error } = await supabase.from('exams').insert([{
+        file_id: selectedFile.id,
+        user_id: user.id,
+        exam_data: parsedExamData,
+        status: 'pending'
+      }]).select('id').single();
+
+      if (error) throw error;
+      toast.success("تم استيراد بنك الأسئلة وإنشاء الامتحان بنجاح!");
+      saveExamLocally({ id: data.id, file_id: selectedFile.id, user_id: user.id, exam_data: parsedExamData, status: 'pending' });
+      navigate(`/exam-room/${data.id}`);
+    } catch (err) {
+      toast.error("فشل استيراد بنك الأسئلة. تحقق من تنسيق الملف.");
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const fileToBase64 = (file) => new Promise((res) => {
@@ -182,7 +247,7 @@ export default function ExamDashboard() {
       : `شرط صارم: قم بصياغة جميع أسئلة الـ JSON والاختيارات والتفسيرات والإجابات باللغة العربية حصراً.`;
 
     const systemPrompt = `You are a Professor. Create a JSON exam strictly following this schema:
-    { "timer_seconds": ${examConfig.isFullSyllabus ? 3600 : 1800}, "questions":[{ "id": 1, "type": "type", "text": "Question text", "options": ["opt1", "opt2"], "correctAnswer": "Exact Correct Answer", "explanation": "Detailed Explanation" }] }
+    { "timer_seconds": ${examConfig.isFullSyllabus ? 3600 : 1800}, "questions":[{ "id": 1, "type": "type", "text": "Question text", "options": ["opt1", "opt2"], "correctAnswer": "Exact Correct Answer", "explanation": "Detailed Explanation", "source_excerpt": "Direct exact quote or paragraph from the provided text for reference when student makes a mistake" }] }
     Language rule: ${langInstruction}
     Required types and rules:
     ${typesDesc}
@@ -206,6 +271,7 @@ export default function ExamDashboard() {
       if (error) throw error;
 
       if (data) {
+        saveExamLocally({ id: data.id, file_id: selectedFile.id, user_id: user.id, exam_data: parsed, status: 'pending' });
         toast.success(isEn ? "Exam generated successfully!" : "تم بناء الامتحان بنجاح!");
         navigate(`/exam-room/${data.id}`);
       }
@@ -215,8 +281,20 @@ export default function ExamDashboard() {
     }
   };
 
+  const calculateAverageScore = () => {
+    const completed = pastExams.filter(e => e.status === 'completed' && e.total_score > 0);
+    if (completed.length === 0) return null;
+    const totalPercentage = completed.reduce((acc, curr) => acc + (curr.score / curr.total_score) * 100, 0);
+    return Math.round(totalPercentage / completed.length);
+  };
+
+  const avgScore = calculateAverageScore();
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#121212] p-4 md:p-12 transition-colors duration-300 pb-24 md:pb-12" dir="rtl">
+      
+      <input type="file" accept=".json" ref={jsonImportRef} onChange={importExamJson} className="hidden" />
+
       <div className="max-w-5xl mx-auto space-y-8">
         
         <div className="flex items-center gap-4">
@@ -256,19 +334,42 @@ export default function ExamDashboard() {
               <X size={20}/>
             </button>
 
-            <div className="md:w-1/3 bg-gray-50 dark:bg-[#121212] border-b md:border-b-0 md:border-l dark:border-gray-800 p-6 overflow-y-auto max-h-[35vh] md:max-h-full shrink-0">
-              <h3 className="font-bold text-lg dark:text-white mb-4 md:mb-6 flex items-center gap-2"><History size={20} className="text-blue-600"/> سجل الاختبارات</h3>
-              <div className="space-y-3">
-                {pastExams.map(ex => (
-                  <div key={ex.id} onClick={() => navigate(`/exam-room/${ex.id}`)} className="bg-white dark:bg-[#1E1E1E] border dark:border-gray-800 p-4 rounded-2xl cursor-pointer hover:border-blue-500 shadow-sm">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ex.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{ex.status === 'completed' ? 'مكتمل' : 'قيد الحل'}</span>
-                      <span className="text-[10px] text-gray-400">{new Date(ex.created_at).toLocaleDateString('ar-EG')}</span>
+            <div className="md:w-1/3 bg-gray-50 dark:bg-[#121212] border-b md:border-b-0 md:border-l dark:border-gray-800 p-6 overflow-y-auto max-h-[35vh] md:max-h-full shrink-0 flex flex-col justify-between">
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-lg dark:text-white flex items-center gap-2"><History size={20} className="text-blue-600"/> سجل الاختبارات</h3>
+                  <button onClick={() => jsonImportRef.current?.click()} className="p-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 rounded-lg hover:bg-blue-100 text-xs font-bold flex items-center gap-1" title="استيراد بنك أسئلة JSON">
+                    <Upload size={14}/> استيراد
+                  </button>
+                </div>
+
+                {avgScore !== null && (
+                  <div className="mb-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-3 rounded-xl shadow-sm flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp size={18}/>
+                      <span className="text-xs font-bold">متوسط الأداء التاريخي:</span>
                     </div>
-                    {ex.status === 'completed' && <p className="text-sm font-black dark:text-white">النتيجة: {ex.score} / {ex.total_score}</p>}
+                    <span className="text-lg font-black">{avgScore}%</span>
                   </div>
-                ))}
-                {pastExams.length === 0 && <p className="text-sm text-gray-400">لا يوجد سجل لهذا الملف.</p>}
+                )}
+
+                <div className="space-y-3">
+                  {pastExams.map(ex => (
+                    <div key={ex.id} onClick={() => navigate(`/exam-room/${ex.id}`)} className="bg-white dark:bg-[#1E1E1E] border dark:border-gray-800 p-4 rounded-2xl cursor-pointer hover:border-blue-500 shadow-sm relative group">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ex.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{ex.status === 'completed' ? 'مكتمل' : 'قيد الحل'}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-gray-400">{new Date(ex.created_at).toLocaleDateString('ar-EG')}</span>
+                          <button onClick={(e) => exportExamJson(ex.id, e)} className="p-1 text-gray-400 hover:text-blue-600" title="تصدير بنك الأسئلة JSON">
+                            <Download size={14}/>
+                          </button>
+                        </div>
+                      </div>
+                      {ex.status === 'completed' && <p className="text-sm font-black dark:text-white">النتيجة: {ex.score} / {ex.total_score}</p>}
+                    </div>
+                  ))}
+                  {pastExams.length === 0 && <p className="text-sm text-gray-400">لا يوجد سجل لهذا الملف.</p>}
+                </div>
               </div>
             </div>
 

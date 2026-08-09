@@ -10,8 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import toast from 'react-hot-toast'; 
-import { supabase } from '../lib/supabase';
-import { detectTextDirection, extractTextWithVisionModel } from '../lib/ai';
+import { detectTextDirection, extractTextWithVisionModel, streamAzureAI } from '../lib/ai';
 import { formatMathExpressions } from '../lib/mathUtils';
 
 import * as pdfjsLib from 'pdfjs-dist';
@@ -293,24 +292,25 @@ export default function AiChat() {
       return { role: m.role, content: m.content };
     });
 
-    const finalPayload = [ { role: 'system', content: systemPrompt }, ...apiMessagesHistory ];
     clearAttachment();
 
     try {
-      const endpoint = import.meta.env.VITE_AZURE_OPENAI_ENDPOINT;
-      const apiKey = import.meta.env.VITE_AZURE_OPENAI_KEY;
-      const model = import.meta.env.VITE_AZURE_DEPLOYMENT_KIMI || 'Kimi-K2.6';
-      const url = `${endpoint.replace(/\/$/, '')}/openai/deployments/${model}/chat/completions?api-version=2024-02-15-preview`;
+      setMessages([...newMessagesList, { role: 'assistant', content: '' }]);
 
-      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'api-key': apiKey }, body: JSON.stringify({ messages: finalPayload, max_completion_tokens: 8000, temperature: 0.4 }) });
-      const resData = await response.json();
-      const aiResponseText = resData.choices[0].message.content;
+      const aiResponseText = await streamAzureAI(
+        systemPrompt,
+        apiMessagesHistory,
+        "",
+        true,
+        (currentText) => {
+          setMessages([...newMessagesList, { role: 'assistant', content: currentText }]);
+        }
+      );
 
-      setMessages([...newMessagesList, { role: 'assistant', content: aiResponseText }]);
       await supabase.from('ai_chat_messages').insert([{ chat_id: currentChatId, role: 'assistant', content: aiResponseText }]);
     } catch (e) {
       toast.error('حدث خطأ في الاتصال، يرجى المحاولة لاحقاً.');
-      setMessages([...newMessagesList, { role: 'assistant', content: 'عذراً، حدث خطأ. يرجى المحاولة.' }]);
+      setMessages([...newMessagesList, { role: 'assistant', content: 'عذراً، حدث خطأ في الاتصال.' }]);
     } finally {
       setIsTyping(false);
     }

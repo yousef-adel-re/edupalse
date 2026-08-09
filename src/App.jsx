@@ -18,16 +18,51 @@ import AiChat from './pages/AiChat';
 import PresentationStudio from './pages/PresentationStudio';
 import BottomNav from './components/BottomNav'; 
 
+import { getPendingExamResults, removePendingExamResult } from './lib/offlineDb';
+
 function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
+    const syncPendingResults = async () => {
+      try {
+        const pending = await getPendingExamResults();
+        if (pending && pending.length > 0) {
+          for (const item of pending) {
+            const { error } = await supabase.from('exams').update({
+              status: item.status,
+              user_answers: item.user_answers,
+              score: item.score,
+              total_score: item.total_score,
+              ai_feedback: item.ai_feedback,
+              final_analysis: item.final_analysis
+            }).eq('id', item.id);
+
+            if (!error) {
+              await removePendingExamResult(item.id);
+            }
+          }
+          toast.success("تم مزامنة نتائج الاختبارات المحفوظة أوفلاين مع السيرفر بنجاح!");
+        }
+      } catch (err) {
+        console.error("Auto sync failed:", err);
+      }
+    };
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      syncPendingResults();
+    };
     const handleOffline = () => setIsOffline(true);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
+    // Initial check on load
+    if (navigator.onLine) {
+      syncPendingResults();
+    }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);

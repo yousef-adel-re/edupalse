@@ -54,7 +54,84 @@ export async function callAzureAI(systemPrompt, messagesHistory, customInstructi
   }
 }
 
+/**
+ * Stream responses from Azure AI models (SSE streaming for real-time word-by-word responses).
+ */
+export async function streamAzureAI(systemPrompt, messagesHistory, customInstructions = "", useKimi = false, onChunk = null) {
+  try {
+    const deploymentName = useKimi ? kimiModel : nanoModel;
+    const cleanEndpoint = getCleanEndpoint();
+    const url = `${cleanEndpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-02-15-preview`;
+
+    const mathRule = '\n\n[تعليمات المعادلات: اكتب أي معادلة أو قانون رياضي بأسلوب LaTeX المنسق محاطاً بـ $ للمعادلات المدمجة أو $$ للمعادلات المنفصلة].';
+    const finalSystemPrompt = customInstructions 
+      ? `${systemPrompt}${mathRule}\n\nتعليمات صارمة:\n${customInstructions}` 
+      : `${systemPrompt}${mathRule}`;
+
+    const apiMessages = [
+      { role: 'system', content: finalSystemPrompt },
+      ...messagesHistory.map(msg => ({
+        role: msg.role === 'assistant' ? 'assistant' : 'user',
+        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+      }))
+    ];
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
+      body: JSON.stringify({
+        messages: apiMessages,
+        temperature: 0.4,
+        max_completion_tokens: 8000,
+        stream: true
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error("Azure Stream Error Detail:", err);
+      throw new Error('Azure API Stream Error');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data: ')) {
+          const dataStr = trimmed.substring(6);
+          if (dataStr === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(dataStr);
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              fullText += content;
+              if (onChunk) onChunk(fullText, content);
+            }
+          } catch (e) {
+            // Ignore parse errors on incomplete chunk lines
+          }
+        }
+      }
+    }
+    return fullText;
+  } catch (error) {
+    console.error("AI Stream Request Failed:", error);
+    throw error;
+  }
+}
+
 export function detectTextDirection(text) {
+
   const arabicRegex = /[\u0600-\u06FF]/;
   return arabicRegex.test(text) ? 'rtl' : 'ltr';
 }

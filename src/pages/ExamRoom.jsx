@@ -3,10 +3,13 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Clock, CheckCircle, XCircle, MessageCircle, ChevronRight, Send, 
-  Loader2, Award, Zap, X, Camera, BrainCircuit
+  Loader2, Award, Zap, X, Camera, BrainCircuit, BookMarked, Maximize2, Minimize2, Printer, ShieldAlert
 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import html2pdf from 'html2pdf.js';
 import { supabase } from '../lib/supabase';
 import { callAzureAI, detectTextDirection, extractTextWithVisionModel } from '../lib/ai';
+import { getExamLocally, saveExamLocally, savePendingExamResult } from '../lib/offlineDb';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -20,13 +23,16 @@ export default function ExamRoom() {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [timeLeft, setTimeLeft] = useState(0);
-  const[isSubmitted, setIsSubmitted] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
   const [loading, setLoading] = useState(true);
-  const[grading, setGrading] = useState(false);
+  const [grading, setGrading] = useState(false);
+
+  const [isProctored, setIsProctored] = useState(false);
+  const [fullscreenWarning, setFullscreenWarning] = useState(false);
   
   const [score, setScore] = useState(0);
   const [totalScore, setTotalScore] = useState(0);
-  const[essayEvaluations, setEssayEvaluations] = useState({}); 
+  const [essayEvaluations, setEssayEvaluations] = useState({}); 
   const [finalAnalysisReport, setFinalAnalysisReport] = useState('');
 
   const [activeChatQuestion, setActiveChatQuestion] = useState(null);
@@ -38,7 +44,7 @@ export default function ExamRoom() {
   useEffect(() => {
     if (examId && examId !== "undefined") fetchExamData();
     else navigate('/exams');
-  },[examId]);
+  }, [examId]);
 
   useEffect(() => {
     if (!isSubmitted && timeLeft > 0) {
@@ -49,12 +55,75 @@ export default function ExamRoom() {
     }
   }, [timeLeft, isSubmitted, exam]);
 
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (isProctored && !document.fullscreenElement && !isSubmitted) {
+        setFullscreenWarning(true);
+        toast.error("تنبيه: خرجت من وضع محاكاة الامتحان!");
+      } else if (document.fullscreenElement) {
+        setFullscreenWarning(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, [isProctored, isSubmitted]);
+
+  const toggleProctoredMode = () => {
+    if (!isProctored) {
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+      setIsProctored(true);
+      toast.success("تم تفعيل وضع المحاكاة والتركيز الصارم!");
+    } else {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setIsProctored(false);
+    }
+  };
+
+  const exportPrintablePDF = () => {
+    const element = document.getElementById('printable-exam-area');
+    if (!element) return;
+    toast.success("جاري إعداد ملف الـ PDF للطباعة...");
+    const opt = {
+      margin: [10, 10, 10, 10],
+      filename: `Exam_${exam?.user_files?.file_name || 'EduPulse'}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    html2pdf().set(opt).from(element).save();
+  };
+
   const fetchExamData = async () => {
     try {
+      if (!navigator.onLine) {
+        const localExam = await getExamLocally(examId);
+        if (localExam) {
+          setExam(localExam);
+          const qs = localExam.exam_data.questions || [];
+          setQuestions(qs);
+          setTotalScore(qs.length);
+          if (localExam.status === 'completed') {
+            setAnswers(localExam.user_answers || {});
+            setScore(localExam.score || 0);
+            setEssayEvaluations(localExam.ai_feedback || {});
+            setFinalAnalysisReport(localExam.final_analysis || '');
+            setIsSubmitted(true);
+          } else {
+            setTimeLeft(localExam.exam_data.timer_seconds || 1800);
+          }
+          return;
+        }
+      }
+
       const { data } = await supabase.from('exams').select('*, user_files(file_name, file_content)').eq('id', examId).maybeSingle();
       if (data) {
         setExam(data);
-        const qs = data.exam_data.questions ||[];
+        saveExamLocally(data);
+        const qs = data.exam_data.questions || [];
         setQuestions(qs);
         setTotalScore(qs.length);
         
@@ -70,6 +139,14 @@ export default function ExamRoom() {
       }
     } catch (err) {
       console.error(err);
+      const localExam = await getExamLocally(examId);
+      if (localExam) {
+        setExam(localExam);
+        const qs = localExam.exam_data.questions || [];
+        setQuestions(qs);
+        setTotalScore(qs.length);
+        setIsSubmitted(localExam.status === 'completed');
+      }
     } finally {
       setLoading(false);
     }
@@ -152,19 +229,33 @@ export default function ExamRoom() {
         setFinalAnalysisReport(aiAnalysis);
       }
 
-      // 3. الحفظ في الداتا بيز
-      const { error } = await supabase.from('exams').update({ 
-        status: 'completed', 
-        user_answers: answers, 
-        score: currentScore, 
-        total_score: questions.length, 
-        ai_feedback: evaluations,
-        final_analysis: aiAnalysis
-      }).eq('id', examId);
+      // 3. الحفظ (أوفلاين أو أونلاين)
+      if (!navigator.onLine) {
+        await savePendingExamResult({
+          id: examId,
+          user_answers: answers,
+          score: currentScore,
+          total_score: questions.length,
+          ai_feedback: evaluations,
+          final_analysis: aiAnalysis,
+          status: 'completed',
+          updated_at: new Date().toISOString()
+        });
+        toast.success("تم حفظ النتيجة محلياً (أوفلاين). ستتزامن تلقائياً عند عودة الاتصال.");
+      } else {
+        const { error } = await supabase.from('exams').update({ 
+          status: 'completed', 
+          user_answers: answers, 
+          score: currentScore, 
+          total_score: questions.length, 
+          ai_feedback: evaluations,
+          final_analysis: aiAnalysis
+        }).eq('id', examId);
 
-      if (error) {
-        alert("حدث خطأ أثناء حفظ النتيجة.");
-        setGrading(false); return; 
+        if (error) {
+          alert("حدث خطأ أثناء حفظ النتيجة.");
+          setGrading(false); return; 
+        }
       }
 
       setScore(currentScore);
@@ -213,21 +304,49 @@ export default function ExamRoom() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#121212] pb-20 font-sans transition-colors" dir="rtl">
       
-      <div className="sticky top-0 z-30 bg-white/90 dark:bg-[#1E1E1E]/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 p-4 shadow-sm flex justify-between items-center px-6">
+      <div className="sticky top-0 z-30 bg-white/90 dark:bg-[#1E1E1E]/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 p-4 shadow-sm flex flex-wrap justify-between items-center px-6 gap-3">
         <button onClick={() => navigate('/exams')} className="text-gray-500 font-bold hover:text-blue-600 flex items-center gap-1 transition-colors"><ChevronRight size={20}/> خروج</button>
-        {!isSubmitted ? (
-          <div className={`flex items-center gap-2 px-6 py-2 rounded-2xl font-mono text-2xl font-bold border-2 ${timeLeft < 300 ? 'text-red-600 border-red-200 animate-pulse' : 'text-blue-600 border-blue-100 dark:border-gray-700'}`}>
-            <Clock size={24}/> {formatTime(timeLeft)}
-          </div>
-        ) : (
-          <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-6 py-2 rounded-xl font-bold flex items-center gap-2 border border-green-200 dark:border-green-800">
-            <Award size={20}/> تم التصحيح
-          </div>
-        )}
+        
+        <div className="flex items-center gap-3">
+          {!isSubmitted ? (
+            <div className={`flex items-center gap-2 px-4 py-1.5 rounded-2xl font-mono text-xl md:text-2xl font-bold border-2 ${timeLeft < 300 ? 'text-red-600 border-red-200 animate-pulse bg-red-50' : 'text-blue-600 border-blue-100 dark:border-gray-700'}`}>
+              <Clock size={22}/> {formatTime(timeLeft)}
+            </div>
+          ) : (
+            <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-4 py-1.5 rounded-xl font-bold flex items-center gap-2 border border-green-200 dark:border-green-800 text-sm">
+              <Award size={18}/> تم التصحيح
+            </div>
+          )}
+
+          <button 
+            onClick={toggleProctoredMode} 
+            className={`px-3 py-1.5 rounded-xl text-xs md:text-sm font-bold flex items-center gap-1.5 border transition-all ${isProctored ? 'bg-purple-600 text-white border-purple-600 shadow-md' : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:border-purple-400'}`}
+            title="وضع المحاكاة ملء الشاشة لمنع التشتت"
+          >
+            {isProctored ? <Minimize2 size={16}/> : <Maximize2 size={16}/>}
+            <span className="hidden sm:inline">{isProctored ? 'إنهاء المحاكاة' : 'وضع المحاكاة'}</span>
+          </button>
+
+          <button 
+            onClick={exportPrintablePDF} 
+            className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl text-xs md:text-sm font-bold flex items-center gap-1.5 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 transition-all"
+            title="تصدير كـ PDF جاهز للطباعة"
+          >
+            <Printer size={16}/>
+            <span className="hidden sm:inline">طباعة PDF</span>
+          </button>
+        </div>
+
         <h2 className="dark:text-white font-black truncate max-w-[200px]">{exam?.user_files?.file_name}</h2>
       </div>
 
-      <div className="max-w-4xl mx-auto p-4 mt-6 space-y-8">
+      {fullscreenWarning && !isSubmitted && (
+        <div className="bg-red-500 text-white px-6 py-3 text-center font-bold text-sm md:text-base flex items-center justify-center gap-2 sticky top-16 z-40 shadow-lg animate-bounce">
+          <ShieldAlert size={20}/> تنبيه صارم: خرجت من الشاشة الكاملة لوضع المحاكاة! الرجاء التركيز في الامتحان.
+        </div>
+      )}
+
+      <div id="printable-exam-area" className="max-w-4xl mx-auto p-4 mt-6 space-y-8">
         
         {isSubmitted && (
           <div className="space-y-6 animate-fade-in-up">
@@ -356,6 +475,18 @@ export default function ExamRoom() {
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* ربط الإجابات الخاطئة بالمرجع في المستند الأصلي (Remediation Link) */}
+                {isWrong && q.source_excerpt && (
+                  <div className="mt-6 p-5 bg-amber-50 dark:bg-amber-950/40 border-r-4 border-amber-500 rounded-l-2xl shadow-sm space-y-2">
+                    <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-black text-sm">
+                      <BookMarked size={20} className="text-amber-600"/> 📌 المرجع المباشر من المستند الأصلي (Remediation Link):
+                    </div>
+                    <p className="text-sm md:text-base leading-relaxed text-amber-950 dark:text-amber-100 font-medium italic">
+                      "{q.source_excerpt}"
+                    </p>
                   </div>
                 )}
 
