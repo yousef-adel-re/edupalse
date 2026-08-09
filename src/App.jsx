@@ -16,6 +16,7 @@ import ExamDashboard from './pages/ExamDashboard';
 import ExamRoom from './pages/ExamRoom';
 import AiChat from './pages/AiChat';
 import PresentationStudio from './pages/PresentationStudio';
+import EntertainmentHub from './pages/EntertainmentHub';
 import BottomNav from './components/BottomNav'; 
 
 import { getPendingExamResults, removePendingExamResult } from './lib/offlineDb';
@@ -137,6 +138,7 @@ function App() {
             <Route path="/exam-room/:examId" element={session ? <ExamRoom /> : <Navigate to="/auth" />} />
             <Route path="/ai-chat" element={session ? <AiChat /> : <Navigate to="/auth" />} />
             <Route path="/presentations" element={session ? <PresentationStudio /> : <Navigate to="/auth" />} />
+            <Route path="/entertainment" element={session ? <EntertainmentHub /> : <Navigate to="/auth" />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </div>

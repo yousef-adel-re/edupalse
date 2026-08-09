@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, BookOpen, FileSignature, MessageSquarePlus, Tv } from 'lucide-react';
+import { Home, BookOpen, FileSignature, MessageSquarePlus, Tv, Gamepad2 } from 'lucide-react';
 
 export default function BottomNav() {
   const navigate = useNavigate();
@@ -16,8 +16,9 @@ export default function BottomNav() {
     { icon: <Home size={22} />, label: 'الرئيسية', path: '/' },
     { icon: <BookOpen size={22} />, label: 'المذاكرة', path: '/study' },
     { icon: <FileSignature size={22} />, label: 'الامتحانات', path: '/exams' },
+    { icon: <Gamepad2 size={22} />, label: 'الترفيه', path: '/entertainment' },
     { icon: <Tv size={22} />, label: 'الباوربوينت', path: '/presentations' },
-    { icon: <MessageSquarePlus size={22} />, label: 'الشات الذكي', path: '/ai-chat' },
+    { icon: <MessageSquarePlus size={22} />, label: 'الشات', path: '/ai-chat' },
   ];
 
   return (

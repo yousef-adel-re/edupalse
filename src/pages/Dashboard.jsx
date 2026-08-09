@@ -16,7 +16,8 @@ import {
   Sparkles,
   Globe,
   AlertTriangle,
-  UserX
+  UserX,
+  Gamepad2
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import Logo from '../components/Logo';
@@ -286,6 +287,26 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 font-black text-base">
               إنشاء عرض تقديم الان <ChevronLeft size={18} />
+            </div>
+          </button>
+
+          {/* 5. قسم الترفيه وألعاب الذكاء (Brain & Entertainment Hub) */}
+          <button 
+            onClick={() => navigate('/entertainment')}
+            className="group relative bg-white dark:bg-[#1E1E1E] p-8 rounded-[2.5rem] shadow-sm border border-gray-100 dark:border-gray-800 text-right transition-all hover:shadow-2xl hover:border-pink-500 hover:-translate-y-2 overflow-hidden flex flex-col justify-between"
+          >
+            <div>
+              <div className="absolute top-0 left-0 w-2 h-full bg-pink-600 transition-all group-hover:w-3" />
+              <div className="bg-pink-50 dark:bg-pink-900/30 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                <Gamepad2 size={32} className="text-pink-600 dark:text-pink-400" />
+              </div>
+              <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-3">قسم الترفيه وألعاب الذكاء</h2>
+              <p className="text-gray-500 dark:text-gray-400 text-sm leading-relaxed mb-6">
+                جدد نشاطك بخمس ألعاب ذكاء تفاعلية (XO، سودوكو، أرقام، ذاكرة، كلمات)، أو صمم لعبتك بالذكاء الاصطناعي!
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-pink-600 dark:text-pink-400 font-black text-base">
+              دخول قسم الترفيه <ChevronLeft size={18} />
             </div>
           </button>
 
