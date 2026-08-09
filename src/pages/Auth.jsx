@@ -41,38 +41,30 @@ export default function Auth() {
         setIsForgotPassword(false);
         setIsLogin(true);
       } else if (isForgotPassword) {
-        // Step 2: Forgot Password - Check Email Registration First
+        // Step 2: Forgot Password - Send Reset Email via Supabase Auth
         const emailToFind = formData.email.trim().toLowerCase();
         
-        // Check in profiles table
+        // 1. Check in profiles table (case-insensitive)
         const { data: profileMatch } = await supabase
           .from('profiles')
-          .select('id')
-          .eq('email', emailToFind)
+          .select('id, email')
+          .ilike('email', emailToFind)
           .maybeSingle();
 
-        // Fallback check in user_files if profile email wasn't recorded previously
-        let isRegistered = !!profileMatch;
-        if (!isRegistered) {
-          const { data: filesMatch } = await supabase
-            .from('user_files')
-            .select('id')
-            .limit(1);
-          // If profiles or files exist under this auth session or RPC check
-          if (profileMatch) isRegistered = true;
-        }
+        // 2. Perform Supabase resetPasswordForEmail
+        const { error } = await supabase.auth.resetPasswordForEmail(emailToFind);
 
-        if (!profileMatch) {
-          toast.error("هذا البريد الإلكتروني غير مسجل في الموقع!");
-          setLoading(false);
-          return;
+        if (error) {
+          if (error.message?.toLowerCase().includes('not found') || error.message?.toLowerCase().includes('invalid') || error.status === 400 || error.status === 404) {
+            toast.error("هذا البريد الإلكتروني غير مسجل في الموقع!");
+            setLoading(false);
+            return;
+          }
+          throw error;
         }
-
-        const { error } = await supabase.auth.resetPasswordForEmail(formData.email.trim());
-        if (error) throw error;
 
         setShowResetOtpStep(true);
-        toast.success("تم إرسال كود استعادة كلمة السر (6 أرقام) إلى بريدك!");
+        toast.success("تم إرسال كود استعادة كلمة السر إلى بريدك الإلكتروني!");
       } else if (showOtpStep) {
         // Signup OTP Verification
         const { error } = await supabase.auth.verifyOtp({
