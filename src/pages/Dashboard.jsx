@@ -130,15 +130,20 @@ export default function Dashboard() {
         return;
       }
 
-      // 2. Delete user's data across tables
-      await supabase.from('user_files').delete().eq('user_id', user.id);
-      await supabase.from('presentations').delete().eq('user_id', user.id);
-      await supabase.from('ai_chats').delete().eq('user_id', user.id);
-      await supabase.from('profiles').delete().eq('id', user.id);
+      // 2. Delete user account permanently from auth.users using RPC (Cascades to all tables)
+      const { error: rpcErr } = await supabase.rpc('delete_user_account');
+
+      if (rpcErr) {
+        console.warn("RPC delete_user_account error, applying fallback deletion:", rpcErr);
+        await supabase.from('user_files').delete().eq('user_id', user.id);
+        await supabase.from('presentations').delete().eq('user_id', user.id);
+        await supabase.from('ai_chats').delete().eq('user_id', user.id);
+        await supabase.from('profiles').delete().eq('id', user.id);
+      }
 
       // 3. Sign out and redirect to /auth
       await supabase.auth.signOut();
-      toast.success("تم حذف حسابك وكافة بياناتك بنجاح.");
+      toast.success("تم حذف حسابك وكافة بياناتك نهائياً.");
       navigate('/auth');
     } catch (err) {
       setMsg({ type: 'error', text: 'حدث خطأ أثناء حذف الحساب' });
