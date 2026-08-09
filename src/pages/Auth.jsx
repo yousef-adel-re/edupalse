@@ -94,16 +94,50 @@ export default function Auth() {
         navigate('/');
       } else {
         // Regular Signup
+        const emailToRegister = formData.email.trim().toLowerCase();
+
+        // 1. Check if email already exists in profiles table
+        const { data: existingProfile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('email', emailToRegister)
+          .maybeSingle();
+
+        if (existingProfile) {
+          toast.error("هذا البريد الإلكتروني مسجل بالفعل! يرجى تسجيل الدخول.");
+          setIsLogin(true);
+          setLoading(false);
+          return;
+        }
+
+        // 2. Perform Supabase SignUp
         const { data, error } = await supabase.auth.signUp({
-          email: formData.email.trim(),
+          email: emailToRegister,
           password: formData.password,
           options: { data: { full_name: formData.name, bit_rewards: 0 } }
         });
-        if (error) throw error;
 
-        if (data.user && !data.session) {
+        if (error) {
+          if (error.message?.includes('already registered') || error.message?.includes('already exists') || error.status === 400) {
+            toast.error("هذا البريد الإلكتروني مسجل بالفعل! يرجى تسجيل الدخول.");
+            setIsLogin(true);
+            setLoading(false);
+            return;
+          }
+          throw error;
+        }
+
+        // 3. Supabase empty identities check (indicates user already exists in auth.users)
+        if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          toast.error("هذا البريد الإلكتروني مسجل بالفعل! يرجى تسجيل الدخول.");
+          setIsLogin(true);
+          setLoading(false);
+          return;
+        }
+
+        if (data?.user && !data?.session) {
           setShowOtpStep(true);
-          toast.success("تم إرسال كود التحقق المكون من 6 أرقام إلى بريدك!");
+          toast.success("تم إرسال كود التحقق إلى بريدك الإلكتروني!");
         } else {
           toast.success("تم إنشاء حسابك بنجاح!");
           navigate('/');
