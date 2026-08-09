@@ -17,6 +17,21 @@ export default function Auth() {
   const [newPassword, setNewPassword] = useState('');
   const [formData, setFormData] = useState({ email: '', password: '', name: '' });
 
+  const isEmailRegistered = async (emailStr) => {
+    try {
+      const { data, error } = await supabase.rpc('check_email_exists', { email_input: emailStr });
+      if (!error && typeof data === 'boolean') return data;
+    } catch (e) {
+      console.warn('RPC check_email_exists failed, falling back:', e);
+    }
+    const { data: profileMatch } = await supabase
+      .from('profiles')
+      .select('id')
+      .ilike('email', emailStr)
+      .maybeSingle();
+    return !!profileMatch;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -44,14 +59,9 @@ export default function Auth() {
         // Step 2: Forgot Password - Check Email Registration First
         const emailToFind = formData.email.trim().toLowerCase();
         
-        // Check in profiles table
-        const { data: profileMatch } = await supabase
-          .from('profiles')
-          .select('id, email')
-          .ilike('email', emailToFind)
-          .maybeSingle();
+        const registered = await isEmailRegistered(emailToFind);
 
-        if (!profileMatch) {
+        if (!registered) {
           toast.error("هذا البريد الإلكتروني غير مسجل! يرجى إنشاء حساب جديد.");
           setLoading(false);
           return;
@@ -86,21 +96,16 @@ export default function Auth() {
         // Regular Signup
         const emailToRegister = formData.email.trim().toLowerCase();
 
-        // 1. Check if email already exists in profiles table
-        const { data: existingProfile } = await supabase
-          .from('profiles')
-          .select('id')
-          .ilike('email', emailToRegister)
-          .maybeSingle();
+        const registered = await isEmailRegistered(emailToRegister);
 
-        if (existingProfile) {
+        if (registered) {
           toast.error("هذا البريد الإلكتروني مسجل بالفعل! يرجى تسجيل الدخول.");
           setIsLogin(true);
           setLoading(false);
           return;
         }
 
-        // 2. Perform Supabase SignUp
+        // Perform Supabase SignUp
         const { data, error } = await supabase.auth.signUp({
           email: emailToRegister,
           password: formData.password,
@@ -117,7 +122,7 @@ export default function Auth() {
           throw error;
         }
 
-        // 3. Supabase empty identities check (indicates user already exists in auth.users)
+        // Supabase empty identities check
         if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
           toast.error("هذا البريد الإلكتروني مسجل بالفعل! يرجى تسجيل الدخول.");
           setIsLogin(true);

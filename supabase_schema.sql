@@ -19,6 +19,18 @@ SET email = u.email
 FROM auth.users u
 WHERE p.id = u.id AND (p.email IS NULL OR p.email = '');
 
+-- RPC Helper: Check if email exists in auth.users or profiles (bypasses RLS safely)
+CREATE OR REPLACE FUNCTION public.check_email_exists(email_input TEXT)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM auth.users WHERE LOWER(email) = LOWER(TRIM(email_input))
+    UNION
+    SELECT 1 FROM public.profiles WHERE LOWER(email) = LOWER(TRIM(email_input))
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Automatic Profile Creation Trigger on User Signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
