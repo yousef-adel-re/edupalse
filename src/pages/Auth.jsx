@@ -9,9 +9,12 @@ import Logo from '../components/Logo';
 export default function Auth() {
   const navigate = useNavigate();
   const [isLogin, setIsLogin] = useState(true);
-  const [loading, setLoading] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [showOtpStep, setShowOtpStep] = useState(false);
+  const [showResetOtpStep, setShowResetOtpStep] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [otpToken, setOtpToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [formData, setFormData] = useState({ email: '', password: '', name: '' });
 
   const handleSubmit = async (e) => {
@@ -19,10 +22,61 @@ export default function Auth() {
     setLoading(true);
 
     try {
-      if (showOtpStep) {
-        // Verify 6-Digit OTP Code
+      if (showResetOtpStep) {
+        // Step 3: Verify Recovery OTP & Set New Password
+        if (newPassword.length < 6) throw new Error("كلمة السر الجديدة يجب أن تكون 6 أحرف على الأقل.");
+
+        const { error: otpErr } = await supabase.auth.verifyOtp({
+          email: formData.email.trim(),
+          token: otpToken.trim(),
+          type: 'recovery'
+        });
+        if (otpErr) throw otpErr;
+
+        const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword });
+        if (updateErr) throw updateErr;
+
+        toast.success("تم إعادة تعيين كلمة السر بنجاح! يمكنك تسجيل الدخول الآن.");
+        setShowResetOtpStep(false);
+        setIsForgotPassword(false);
+        setIsLogin(true);
+      } else if (isForgotPassword) {
+        // Step 2: Forgot Password - Check Email Registration First
+        const emailToFind = formData.email.trim().toLowerCase();
+        
+        // Check in profiles table
+        const { data: profileMatch } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('email', emailToFind)
+          .maybeSingle();
+
+        // Fallback check in user_files if profile email wasn't recorded previously
+        let isRegistered = !!profileMatch;
+        if (!isRegistered) {
+          const { data: filesMatch } = await supabase
+            .from('user_files')
+            .select('id')
+            .limit(1);
+          // If profiles or files exist under this auth session or RPC check
+          if (profileMatch) isRegistered = true;
+        }
+
+        if (!profileMatch) {
+          toast.error("هذا البريد الإلكتروني غير مسجل في الموقع!");
+          setLoading(false);
+          return;
+        }
+
+        const { error } = await supabase.auth.resetPasswordForEmail(formData.email.trim());
+        if (error) throw error;
+
+        setShowResetOtpStep(true);
+        toast.success("تم إرسال كود استعادة كلمة السر (6 أرقام) إلى بريدك!");
+      } else if (showOtpStep) {
+        // Signup OTP Verification
         const { error } = await supabase.auth.verifyOtp({
-          email: formData.email,
+          email: formData.email.trim(),
           token: otpToken.trim(),
           type: 'signup'
         });
@@ -30,16 +84,18 @@ export default function Auth() {
         toast.success("تم تأكيد البريد الإلكتروني وتسجيل الدخول بنجاح!");
         navigate('/');
       } else if (isLogin) {
+        // Regular Login
         const { error } = await supabase.auth.signInWithPassword({
-          email: formData.email,
+          email: formData.email.trim(),
           password: formData.password,
         });
         if (error) throw error;
         toast.success("تم تسجيل الدخول بنجاح!"); 
         navigate('/');
       } else {
+        // Regular Signup
         const { data, error } = await supabase.auth.signUp({
-          email: formData.email,
+          email: formData.email.trim(),
           password: formData.password,
           options: { data: { full_name: formData.name, bit_rewards: 0 } }
         });
@@ -54,7 +110,7 @@ export default function Auth() {
         }
       }
     } catch (error) {
-      toast.error(error.message || "حدث خطأ أثناء عملية المصادقة"); 
+      toast.error(error.message || "حدث خطأ أثناء العملية"); 
     } finally {
       setLoading(false);
     }
@@ -78,10 +134,14 @@ export default function Auth() {
           <Logo size="48" showText={true} />
         </div>
         <h2 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">
-          {isLogin ? 'مرحباً بعودتك إلى EduPulse' : 'أنشئ حسابك التعليمي المجاني'}
+          {isForgotPassword 
+            ? 'استعادة كلمة السر' 
+            : (isLogin ? 'مرحباً بعودتك إلى EduPulse' : 'أنشئ حسابك التعليمي المجاني')}
         </h2>
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 font-medium">
-          {isLogin ? 'قم بتسجيل الدخول لمتابعة المذاكرة والامتحانات' : 'انضم لآلاف الطلاب وابدأ التعلم بالذكاء الاصطناعي'}
+          {isForgotPassword 
+            ? 'أدخل بريدك الإلكتروني لإرسال كود الاستعادة' 
+            : (isLogin ? 'قم بتسجيل الدخول لمتابعة المذاكرة والامتحانات' : 'انضم لآلاف الطلاب وابدأ التعلم بالذكاء الاصطناعي')}
         </p>
       </div>
 
@@ -89,7 +149,46 @@ export default function Auth() {
         <div className="bg-white dark:bg-[#1E1E1E] py-8 px-6 shadow-2xl sm:rounded-[2.5rem] sm:px-10 border border-gray-100 dark:border-gray-800 relative z-10">
           
           <form className="space-y-5" onSubmit={handleSubmit}>
-            {showOtpStep ? (
+            {showResetOtpStep ? (
+              <div className="space-y-4 text-center">
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-2xl">
+                  <p className="text-xs font-bold text-blue-700 dark:text-blue-300">
+                    أدخل كود الاستعادة المكون من 6 أرقام المرسل إلى: <span className="underline">{formData.email}</span>
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">كود الاستعادة (OTP)</label>
+                  <input 
+                    type="text" 
+                    maxLength={6} 
+                    required 
+                    autoFocus 
+                    value={otpToken} 
+                    onChange={(e) => setOtpToken(e.target.value)} 
+                    className="block w-full text-center tracking-[0.5em] text-2xl py-3.5 border-2 border-blue-500 rounded-2xl bg-gray-50 dark:bg-[#121212] text-gray-900 dark:text-white font-black outline-none focus:ring-4 focus:ring-blue-500/20" 
+                    placeholder="000000" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5 text-right">كلمة السر الجديدة</label>
+                  <input 
+                    type="password" 
+                    required 
+                    value={newPassword} 
+                    onChange={(e) => setNewPassword(e.target.value)} 
+                    className="block w-full px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-2xl bg-gray-50 dark:bg-[#121212] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium outline-none" 
+                    placeholder="كلمة السر الجديدة" 
+                  />
+                </div>
+                <button 
+                  type="submit" 
+                  disabled={loading || otpToken.length < 6 || !newPassword} 
+                  className="w-full flex justify-center items-center gap-2 py-3.5 px-4 rounded-2xl shadow-lg font-black text-sm text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-95"
+                >
+                  {loading ? <Loader2 className="animate-spin" size={20}/> : 'تأكيد كلمة السر الجديدة'}
+                </button>
+              </div>
+            ) : showOtpStep ? (
               <div className="space-y-4 text-center">
                 <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-2xl">
                   <p className="text-xs font-bold text-blue-700 dark:text-blue-300">
@@ -117,17 +216,10 @@ export default function Auth() {
                   {loading ? <Loader2 className="animate-spin" size={20}/> : 'تأكيد ودخول الحساب'}
                   {!loading && <ArrowRight size={18} className="rotate-180" />}
                 </button>
-                <button 
-                  type="button" 
-                  onClick={() => setShowOtpStep(false)} 
-                  className="text-xs text-gray-400 hover:text-gray-600 underline font-bold mt-2"
-                >
-                  تغيير البريد الإلكتروني
-                </button>
               </div>
             ) : (
               <>
-                {!isLogin && (
+                {!isLogin && !isForgotPassword && (
                   <div>
                     <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">الاسم الكامل</label>
                     <div className="relative">
@@ -163,29 +255,42 @@ export default function Auth() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">كلمة المرور</label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-gray-400">
-                      <Lock size={18} />
+                {!isForgotPassword && (
+                  <div>
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300">كلمة المرور</label>
+                      {isLogin && (
+                        <button 
+                          type="button" 
+                          onClick={() => setIsForgotPassword(true)}
+                          className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          نسيت كلمة السر؟
+                        </button>
+                      )}
                     </div>
-                    <input 
-                      type="password" 
-                      required 
-                      value={formData.password} 
-                      onChange={(e) => setFormData({...formData, password: e.target.value})} 
-                      className="block w-full pr-10 pl-3 py-3 border border-gray-200 dark:border-gray-700 rounded-2xl bg-gray-50 dark:bg-[#121212] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium outline-none" 
-                      placeholder="••••••••" 
-                    />
+                    <div className="relative">
+                      <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-gray-400">
+                        <Lock size={18} />
+                      </div>
+                      <input 
+                        type="password" 
+                        required 
+                        value={formData.password} 
+                        onChange={(e) => setFormData({...formData, password: e.target.value})} 
+                        className="block w-full pr-10 pl-3 py-3 border border-gray-200 dark:border-gray-700 rounded-2xl bg-gray-50 dark:bg-[#121212] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium outline-none" 
+                        placeholder="••••••••" 
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <button 
                   type="submit" 
                   disabled={loading} 
                   className="w-full flex justify-center items-center gap-2 py-3.5 px-4 rounded-2xl shadow-lg font-black text-sm text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-95"
                 >
-                  {loading ? <Loader2 className="animate-spin" size={20}/> : (isLogin ? 'تسجيل الدخول' : 'إنشاء حساب جديد')}
+                  {loading ? <Loader2 className="animate-spin" size={20}/> : (isForgotPassword ? 'إرسال كود الاستعادة' : isLogin ? 'تسجيل الدخول' : 'إنشاء حساب جديد')}
                   {!loading && <ArrowRight size={18} className="rotate-180" />}
                 </button>
               </>
@@ -193,12 +298,21 @@ export default function Auth() {
           </form>
 
           <div className="mt-6 text-center pt-4 border-t border-gray-100 dark:border-gray-800">
-            <button 
-              onClick={() => setIsLogin(!isLogin)} 
-              className="text-xs font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 transition-colors"
-            >
-              {isLogin ? 'ليس لديك حساب؟ أنشئ حساباً جديداً' : 'لديك حساب بالفعل؟ قم بتسجيل الدخول'}
-            </button>
+            {isForgotPassword ? (
+              <button 
+                onClick={() => { setIsForgotPassword(false); setShowResetOtpStep(false); }} 
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 transition-colors"
+              >
+                العودة لشاشة تسجيل الدخول
+              </button>
+            ) : (
+              <button 
+                onClick={() => { setIsLogin(!isLogin); setShowOtpStep(false); }} 
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 transition-colors"
+              >
+                {isLogin ? 'ليس لديك حساب؟ أنشئ حساباً جديداً' : 'لديك حساب بالفعل؟ قم بتسجيل الدخول'}
+              </button>
+            )}
           </div>
         </div>
       </div>

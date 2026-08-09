@@ -14,20 +14,26 @@ import {
   Moon,
   Sun,
   Sparkles,
-  Globe
+  Globe,
+  AlertTriangle,
+  UserX
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import Logo from '../components/Logo';
 import { useTheme } from '../context/ThemeContext';
+import toast from 'react-hot-toast';
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const [profile, setProfile] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDeleteAccountOpen, setIsDeleteAccountOpen] = useState(false);
   
   const [newName, setNewName] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState({ type: '', text: '' });
 
@@ -99,6 +105,45 @@ export default function Dashboard() {
         window.location.reload();
       }
       setLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletePassword) {
+      toast.error("يرجى كتابة كلمة المرور لتأكيد حذف الحساب.");
+      return;
+    }
+    setDeleteAccountLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 1. Verify user password first
+      const { error: authErr } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: deletePassword
+      });
+
+      if (authErr) {
+        setMsg({ type: 'error', text: 'كلمة المرور غير صحيحة! تعذر حذف الحساب.' });
+        setDeleteAccountLoading(false);
+        return;
+      }
+
+      // 2. Delete user's data across tables
+      await supabase.from('user_files').delete().eq('user_id', user.id);
+      await supabase.from('presentations').delete().eq('user_id', user.id);
+      await supabase.from('ai_chats').delete().eq('user_id', user.id);
+      await supabase.from('profiles').delete().eq('id', user.id);
+
+      // 3. Sign out and redirect to /auth
+      await supabase.auth.signOut();
+      toast.success("تم حذف حسابك وكافة بياناتك بنجاح.");
+      navigate('/auth');
+    } catch (err) {
+      setMsg({ type: 'error', text: 'حدث خطأ أثناء حذف الحساب' });
+    } finally {
+      setDeleteAccountLoading(false);
     }
   };
 
@@ -187,7 +232,7 @@ export default function Dashboard() {
             <div>
               <div className="absolute top-0 left-0 w-2 h-full bg-indigo-600 transition-all group-hover:w-3" />
               <div className="bg-indigo-50 dark:bg-indigo-900/30 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                <FileSignature size={32} className="text-indigo-600 dark:text-indigo-400" />
+                <FileSignature size={32} className="text-indigo-600 dark:indigo-400" />
               </div>
               <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-3">مركز الامتحانات</h2>
               <p className="text-gray-500 dark:text-gray-400 text-sm leading-relaxed mb-6">
@@ -308,6 +353,13 @@ export default function Dashboard() {
                   </button>
 
                   <button 
+                    onClick={() => { setIsSettingsOpen(false); setIsDeleteAccountOpen(true); }}
+                    className="w-full flex items-center justify-center gap-2 py-3.5 bg-red-600 hover:bg-red-700 text-white font-black text-sm rounded-2xl transition-colors"
+                  >
+                    <UserX size={18} /> حذف الحساب بالكامل
+                  </button>
+
+                  <button 
                     onClick={handleLogout}
                     className="w-full flex items-center justify-center gap-2 py-3.5 bg-gray-100 hover:bg-gray-200 dark:bg-[#121212] dark:hover:bg-gray-800 text-gray-800 dark:text-gray-200 font-black text-sm rounded-2xl transition-colors"
                   >
@@ -316,6 +368,60 @@ export default function Dashboard() {
                 </div>
 
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Account Confirmation Modal */}
+      {isDeleteAccountOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn" dir="rtl">
+          <div className="bg-white dark:bg-[#1E1E1E] rounded-[2.5rem] p-6 sm:p-8 max-w-md w-full border border-red-200 dark:border-red-900/40 shadow-2xl space-y-5 relative">
+            <button 
+              onClick={() => setIsDeleteAccountOpen(false)}
+              className="absolute top-6 left-6 p-2 rounded-full text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center justify-center border-4 border-red-50 dark:border-red-900/20 shadow-inner">
+                <AlertTriangle size={32} />
+              </div>
+              <h3 className="text-xl font-black text-gray-900 dark:text-white">حذف الحساب نهائياً</h3>
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40 p-4 rounded-2xl">
+                <p className="text-xs font-bold text-red-700 dark:text-red-300 leading-relaxed">
+                  تنبيه صارم: سيتم مسح جميع ملفاتك، امتحاناتك، محادثاتك وعروضك التقديمية وحسابك نهائياً! ولن تتمكن من استعادتها بأي حال من الأحوال.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">أدخل كلمة المرور لتأكيد الحذف النهائي:</label>
+              <input 
+                type="password" 
+                required 
+                value={deletePassword} 
+                onChange={(e) => setDeletePassword(e.target.value)} 
+                className="w-full bg-gray-50 dark:bg-[#121212] border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3.5 text-gray-900 dark:text-white focus:outline-none focus:border-red-500 text-sm font-medium" 
+                placeholder="••••••••" 
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button 
+                onClick={handleDeleteAccount}
+                disabled={deleteAccountLoading || !deletePassword}
+                className="flex-1 py-3.5 bg-red-600 hover:bg-red-700 text-white font-black text-sm rounded-2xl shadow-lg shadow-red-600/30 transition-all disabled:opacity-50"
+              >
+                {deleteAccountLoading ? 'جاري حذف الحساب...' : 'حذف الحساب نهائياً'}
+              </button>
+              <button 
+                onClick={() => setIsDeleteAccountOpen(false)}
+                className="px-5 py-3.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold text-sm rounded-2xl transition-colors"
+              >
+                إلغاء
+              </button>
             </div>
           </div>
         </div>
