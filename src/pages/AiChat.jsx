@@ -10,6 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import toast from 'react-hot-toast'; 
+import { supabase } from '../lib/supabase';
 import { detectTextDirection, extractTextWithVisionModel, streamAzureAI } from '../lib/ai';
 import { formatMathExpressions } from '../lib/mathUtils';
 
