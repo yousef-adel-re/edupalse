@@ -153,20 +153,20 @@ export default function Auth() {
               <div className="space-y-4 text-center">
                 <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-2xl">
                   <p className="text-xs font-bold text-blue-700 dark:text-blue-300">
-                    أدخل كود الاستعادة المكون من 6 أرقام المرسل إلى: <span className="underline">{formData.email}</span>
+                    أدخل كود الاستعادة المرسل إلى: <span className="underline">{formData.email}</span>
                   </p>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">كود الاستعادة (OTP)</label>
                   <input 
                     type="text" 
-                    maxLength={6} 
+                    maxLength={12} 
                     required 
                     autoFocus 
                     value={otpToken} 
                     onChange={(e) => setOtpToken(e.target.value)} 
-                    className="block w-full text-center tracking-[0.5em] text-2xl py-3.5 border-2 border-blue-500 rounded-2xl bg-gray-50 dark:bg-[#121212] text-gray-900 dark:text-white font-black outline-none focus:ring-4 focus:ring-blue-500/20" 
-                    placeholder="000000" 
+                    className="block w-full text-center tracking-[0.3em] text-2xl py-3.5 border-2 border-blue-500 rounded-2xl bg-gray-50 dark:bg-[#121212] text-gray-900 dark:text-white font-black outline-none focus:ring-4 focus:ring-blue-500/20 uppercase" 
+                    placeholder="رمز التحقق" 
                   />
                 </div>
                 <div>
@@ -182,7 +182,7 @@ export default function Auth() {
                 </div>
                 <button 
                   type="submit" 
-                  disabled={loading || otpToken.length < 6 || !newPassword} 
+                  disabled={loading || !otpToken.trim() || !newPassword} 
                   className="w-full flex justify-center items-center gap-2 py-3.5 px-4 rounded-2xl shadow-lg font-black text-sm text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-95"
                 >
                   {loading ? <Loader2 className="animate-spin" size={20}/> : 'تأكيد كلمة السر الجديدة'}
@@ -192,25 +192,25 @@ export default function Auth() {
               <div className="space-y-4 text-center">
                 <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-2xl">
                   <p className="text-xs font-bold text-blue-700 dark:text-blue-300">
-                    أدخل كود التحقق المكون من 6 أرقام المرسل إلى: <span className="underline">{formData.email}</span>
+                    أدخل كود التحقق المرسل إلى: <span className="underline">{formData.email}</span>
                   </p>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">كود التحقق (OTP)</label>
                   <input 
                     type="text" 
-                    maxLength={6} 
+                    maxLength={12} 
                     required 
                     autoFocus 
                     value={otpToken} 
                     onChange={(e) => setOtpToken(e.target.value)} 
-                    className="block w-full text-center tracking-[0.5em] text-2xl py-3.5 border-2 border-blue-500 rounded-2xl bg-gray-50 dark:bg-[#121212] text-gray-900 dark:text-white font-black outline-none focus:ring-4 focus:ring-blue-500/20" 
-                    placeholder="000000" 
+                    className="block w-full text-center tracking-[0.3em] text-2xl py-3.5 border-2 border-blue-500 rounded-2xl bg-gray-50 dark:bg-[#121212] text-gray-900 dark:text-white font-black outline-none focus:ring-4 focus:ring-blue-500/20 uppercase" 
+                    placeholder="رمز التحقق" 
                   />
                 </div>
                 <button 
                   type="submit" 
-                  disabled={loading || otpToken.length < 6} 
+                  disabled={loading || !otpToken.trim()} 
                   className="w-full flex justify-center items-center gap-2 py-3.5 px-4 rounded-2xl shadow-lg font-black text-sm text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none transition-all disabled:opacity-50 hover:scale-[1.02] active:scale-95"
                 >
                   {loading ? <Loader2 className="animate-spin" size={20}/> : 'تأكيد ودخول الحساب'}
