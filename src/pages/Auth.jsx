@@ -41,27 +41,25 @@ export default function Auth() {
         setIsForgotPassword(false);
         setIsLogin(true);
       } else if (isForgotPassword) {
-        // Step 2: Forgot Password - Send Reset Email via Supabase Auth
+        // Step 2: Forgot Password - Check Email Registration First
         const emailToFind = formData.email.trim().toLowerCase();
         
-        // 1. Check in profiles table (case-insensitive)
+        // Check in profiles table
         const { data: profileMatch } = await supabase
           .from('profiles')
           .select('id, email')
           .ilike('email', emailToFind)
           .maybeSingle();
 
-        // 2. Perform Supabase resetPasswordForEmail
-        const { error } = await supabase.auth.resetPasswordForEmail(emailToFind);
-
-        if (error) {
-          if (error.message?.toLowerCase().includes('not found') || error.message?.toLowerCase().includes('invalid') || error.status === 400 || error.status === 404) {
-            toast.error("هذا البريد الإلكتروني غير مسجل في الموقع!");
-            setLoading(false);
-            return;
-          }
-          throw error;
+        if (!profileMatch) {
+          toast.error("هذا البريد الإلكتروني غير مسجل! يرجى إنشاء حساب جديد.");
+          setLoading(false);
+          return;
         }
+
+        // Perform Supabase resetPasswordForEmail
+        const { error } = await supabase.auth.resetPasswordForEmail(emailToFind);
+        if (error) throw error;
 
         setShowResetOtpStep(true);
         toast.success("تم إرسال كود استعادة كلمة السر إلى بريدك الإلكتروني!");
@@ -92,7 +90,7 @@ export default function Auth() {
         const { data: existingProfile } = await supabase
           .from('profiles')
           .select('id')
-          .eq('email', emailToRegister)
+          .ilike('email', emailToRegister)
           .maybeSingle();
 
         if (existingProfile) {
