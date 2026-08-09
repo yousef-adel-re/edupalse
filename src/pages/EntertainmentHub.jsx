@@ -3,15 +3,15 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ChevronRight, Sparkles, Gamepad2, Brain, Play, RefreshCw, X, 
-  RotateCcw, Trophy, CheckCircle, HelpCircle, Plus, Loader2, Code2
+  RotateCcw, Trophy, CheckCircle, HelpCircle, Plus, Loader2, Code2, Flame, Shield, Award
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { callAzureAI } from '../lib/ai';
 
 // -----------------------------------------------------------------------------
-// 1. لعبة XO (Tic Tac Toe)
+// 1. لعبة XO (Tic Tac Toe) مع 3 مستويات صعوبة
 // -----------------------------------------------------------------------------
-const XOGame = ({ onRestart }) => {
+const XOGame = ({ difficulty = 'medium' }) => {
   const [board, setBoard] = useState(Array(9).fill(null));
   const [isXNext, setIsXNext] = useState(true);
   const [vsAI, setVsAI] = useState(true);
@@ -53,16 +53,59 @@ const XOGame = ({ onRestart }) => {
   const makeAIMove = (currentBoard) => {
     const emptyIndices = currentBoard.map((val, idx) => val === null ? idx : null).filter(val => val !== null);
     if (emptyIndices.length === 0 || checkWinner(currentBoard)) return;
-    const randomIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+
+    let targetIndex = null;
+
+    if (difficulty === 'easy') {
+      // عشوائي تماماً
+      targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+    } else if (difficulty === 'medium') {
+      // 50% يمنع الفوز و 50% عشوائي
+      const winMove = findBestWinOrBlock(currentBoard, 'O') || findBestWinOrBlock(currentBoard, 'X');
+      if (winMove !== null && Math.random() > 0.4) {
+        targetIndex = winMove;
+      } else {
+        targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+      }
+    } else {
+      // صعب: ذكي جداً يبحث عن الفوز ثم المنع ثم الأماكن الاستراتيجية
+      const winMove = findBestWinOrBlock(currentBoard, 'O');
+      const blockMove = findBestWinOrBlock(currentBoard, 'X');
+      if (winMove !== null) targetIndex = winMove;
+      else if (blockMove !== null) targetIndex = blockMove;
+      else if (currentBoard[4] === null) targetIndex = 4; // السنتر
+      else {
+        const corners = [0, 2, 6, 8].filter(c => currentBoard[c] === null);
+        if (corners.length > 0) targetIndex = corners[Math.floor(Math.random() * corners.length)];
+        else targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+      }
+    }
+
     const aiBoard = [...currentBoard];
-    aiBoard[randomIndex] = 'O';
+    aiBoard[targetIndex] = 'O';
     setBoard(aiBoard);
     const win = checkWinner(aiBoard);
-    if (win) {
-      setWinnerInfo(win);
-    } else {
-      setIsXNext(true);
+    if (win) setWinnerInfo(win);
+    else setIsXNext(true);
+  };
+
+  const findBestWinOrBlock = (b, player) => {
+    const lines = [
+      [0, 1, 2], [3, 4, 5], [6, 7, 8],
+      [0, 3, 6], [1, 4, 7], [2, 5, 8],
+      [0, 4, 8], [2, 4, 6]
+    ];
+    for (let [a, bIdx, c] of lines) {
+      const vals = [b[a], b[bIdx], b[c]];
+      const countPlayer = vals.filter(v => v === player).length;
+      const countNull = vals.filter(v => v === null).length;
+      if (countPlayer === 2 && countNull === 1) {
+        if (b[a] === null) return a;
+        if (b[bIdx] === null) return bIdx;
+        if (b[c] === null) return c;
+      }
     }
+    return null;
   };
 
   const resetGame = () => {
@@ -100,33 +143,48 @@ const XOGame = ({ onRestart }) => {
 // -----------------------------------------------------------------------------
 // 2. لعبة الأرقام والحساب السريع (Math Speed Challenge)
 // -----------------------------------------------------------------------------
-const MathSpeedGame = () => {
+const MathSpeedGame = ({ difficulty = 'medium' }) => {
   const [problem, setProblem] = useState({ num1: 0, num2: 0, op: '+', ans: 0 });
   const [options, setOptions] = useState([]);
   const [score, setScore] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(30);
+  
+  const initialTimer = difficulty === 'easy' ? 45 : difficulty === 'medium' ? 30 : 15;
+  const [timeLeft, setTimeLeft] = useState(initialTimer);
   const [isGameOver, setIsGameOver] = useState(false);
 
   const generateProblem = () => {
-    const ops = ['+', '-', '×'];
+    let ops = ['+', '-'];
+    let maxNum = 10;
+    if (difficulty === 'medium') {
+      ops = ['+', '-', '×'];
+      maxNum = 20;
+    } else if (difficulty === 'hard') {
+      ops = ['+', '-', '×', '÷'];
+      maxNum = 50;
+    }
+
     const op = ops[Math.floor(Math.random() * ops.length)];
-    let num1 = Math.floor(Math.random() * 12) + 1;
-    let num2 = Math.floor(Math.random() * 12) + 1;
-    if (op === '-' && num1 < num2) [num1, num2] = [num2, num1];
-    let ans = op === '+' ? num1 + num2 : op === '-' ? num1 - num2 : num1 * num2;
+    let num1 = Math.floor(Math.random() * maxNum) + 1;
+    let num2 = Math.floor(Math.random() * (difficulty === 'hard' ? 20 : 10)) + 1;
     
-    let wrong1 = ans + Math.floor(Math.random() * 5) + 1;
-    let wrong2 = Math.max(0, ans - Math.floor(Math.random() * 5) - 1);
-    let wrong3 = ans + Math.floor(Math.random() * 10) + 6;
-    let opts = [ans, wrong1, wrong2, wrong3].sort(() => Math.random() - 0.5);
+    if (op === '-' && num1 < num2) [num1, num2] = [num2, num1];
+    if (op === '÷') {
+      num1 = num2 * (Math.floor(Math.random() * 8) + 1); // قسمة بدون باقٍ
+    }
+
+    let ans = op === '+' ? num1 + num2 : op === '-' ? num1 - num2 : op === '×' ? num1 * num2 : num1 / num2;
+    
+    let wrong1 = ans + Math.floor(Math.random() * 4) + 1;
+    let wrong2 = Math.max(0, ans - Math.floor(Math.random() * 4) - 1);
+    let wrong3 = ans + Math.floor(Math.random() * 8) + 5;
+    let opts = Array.from(new Set([ans, wrong1, wrong2, wrong3])).slice(0, 4).sort(() => Math.random() - 0.5);
+    while (opts.length < 4) opts.push(ans + opts.length + 2);
 
     setProblem({ num1, num2, op, ans });
     setOptions(opts);
   };
 
-  useEffect(() => {
-    generateProblem();
-  }, []);
+  useEffect(() => { generateProblem(); }, [difficulty]);
 
   useEffect(() => {
     if (timeLeft > 0 && !isGameOver) {
@@ -140,17 +198,19 @@ const MathSpeedGame = () => {
   const handleChoice = (val) => {
     if (isGameOver) return;
     if (val === problem.ans) {
-      setScore(s => s + 10);
+      const points = difficulty === 'easy' ? 5 : difficulty === 'medium' ? 10 : 20;
+      setScore(s => s + points);
       generateProblem();
     } else {
-      setScore(s => Math.max(0, s - 5));
+      const penalty = difficulty === 'easy' ? 2 : difficulty === 'medium' ? 5 : 10;
+      setScore(s => Math.max(0, s - penalty));
       generateProblem();
     }
   };
 
   const restartGame = () => {
     setScore(0);
-    setTimeLeft(30);
+    setTimeLeft(initialTimer);
     setIsGameOver(false);
     generateProblem();
   };
@@ -191,8 +251,12 @@ const MathSpeedGame = () => {
 // -----------------------------------------------------------------------------
 // 3. لعبة مطابقة الذاكرة (Memory Flip Game)
 // -----------------------------------------------------------------------------
-const MemoryMatchGame = () => {
-  const icons = ['🧠', '⚡', '🚀', '🎯', '💡', '📚'];
+const MemoryMatchGame = ({ difficulty = 'medium' }) => {
+  const allIcons = ['🧠', '⚡', '🚀', '🎯', '💡', '📚', '🏆', '🎨', '🔬', '🔮'];
+  
+  const cardCount = difficulty === 'easy' ? 3 : difficulty === 'medium' ? 6 : 10;
+  const icons = allIcons.slice(0, cardCount);
+
   const [cards, setCards] = useState([]);
   const [flipped, setFlipped] = useState([]);
   const [matched, setMatched] = useState([]);
@@ -206,7 +270,7 @@ const MemoryMatchGame = () => {
     setMoves(0);
   };
 
-  useEffect(() => { initGame(); }, []);
+  useEffect(() => { initGame(); }, [difficulty]);
 
   const handleCardClick = (idx) => {
     if (flipped.length === 2 || flipped.includes(idx) || matched.includes(idx)) return;
@@ -225,6 +289,8 @@ const MemoryMatchGame = () => {
     }
   };
 
+  const gridCols = difficulty === 'easy' ? 'grid-cols-3' : difficulty === 'medium' ? 'grid-cols-4' : 'grid-cols-5';
+
   return (
     <div className="flex flex-col items-center space-y-6">
       <div className="flex justify-between w-full max-w-xs text-sm font-bold text-gray-500">
@@ -232,7 +298,7 @@ const MemoryMatchGame = () => {
         <span>المكتشف: {matched.length / 2} / {icons.length}</span>
       </div>
 
-      <div className="grid grid-cols-4 gap-3 w-72 md:w-96">
+      <div className={`grid ${gridCols} gap-3 w-72 md:w-96`}>
         {cards.map((c, idx) => {
           const isOpen = flipped.includes(idx) || matched.includes(idx);
           return (
@@ -256,14 +322,27 @@ const MemoryMatchGame = () => {
 // -----------------------------------------------------------------------------
 // 4. لعبة فك تشفير الكلمات (Word Scramble)
 // -----------------------------------------------------------------------------
-const WordScrambleGame = () => {
-  const words = [
-    { target: 'فيزياء', hint: 'علم دراسة المادة والطاقة' },
-    { target: 'خوارزمية', hint: 'خطوات منطقية محددة لحل مشكلة' },
-    { target: 'كيمياء', hint: 'علم العناصر والتفاعلات' },
-    { target: 'برمجة', hint: 'كتابة أفق الأوامر للحاسوب' },
-    { target: 'معادلة', hint: 'تساوي طرفين رياضيات' }
+const WordScrambleGame = ({ difficulty = 'medium' }) => {
+  const wordsEasy = [
+    { target: 'علم', hint: 'المعرفة والنور' },
+    { target: 'ذرة', hint: 'أصغر وحدة في المادة' },
+    { target: 'قوة', hint: 'المؤثر الفيزيائي للحركة' },
+    { target: 'نور', hint: 'مصدر الإضاءة' }
   ];
+  const wordsMedium = [
+    { target: 'فيزياء', hint: 'علم دراسة المادة والطاقة' },
+    { target: 'خوارزمية', hint: 'خطوات منطقية لحل مشكلة' },
+    { target: 'كيمياء', hint: 'علم العناصر والتفاعلات' },
+    { target: 'برمجة', hint: 'كتابة الأوامر للحاسوب' }
+  ];
+  const wordsHard = [
+    { target: 'ترانسفورمر', hint: 'نموذج ذكاء اصطناعي حديث' },
+    { target: 'سيكولوجيا', hint: 'علم دراسة السلوك والنفس' },
+    { target: 'ديناميكا', hint: 'علم الحركة والقوى' },
+    { target: 'الترابط الفلكي', hint: 'علاقات الأجرام الفضائية' }
+  ];
+
+  const words = difficulty === 'easy' ? wordsEasy : difficulty === 'medium' ? wordsMedium : wordsHard;
 
   const [wordIdx, setWordIdx] = useState(0);
   const [scrambled, setScrambled] = useState('');
@@ -278,7 +357,7 @@ const WordScrambleGame = () => {
     setStatusMsg('');
   };
 
-  useEffect(() => { loadWord(0); }, []);
+  useEffect(() => { loadWord(0); }, [difficulty]);
 
   const handleCheck = () => {
     if (guess.trim() === words[wordIdx].target) {
@@ -296,7 +375,7 @@ const WordScrambleGame = () => {
   return (
     <div className="flex flex-col items-center space-y-6 text-center max-w-md mx-auto">
       <div className="bg-blue-50 dark:bg-blue-900/30 p-6 rounded-3xl border-2 border-blue-200 dark:border-blue-800 w-full">
-        <span className="text-xs font-bold text-blue-600 block mb-2">💡 التلميح: {words[wordIdx].hint}</span>
+        <span className="text-xs font-bold text-blue-600 block mb-2">💡 التلميح: {words[wordIdx]?.hint}</span>
         <div className="text-4xl font-black text-blue-800 dark:text-blue-200 my-4 tracking-widest">{scrambled}</div>
       </div>
 
@@ -316,15 +395,28 @@ const WordScrambleGame = () => {
 };
 
 // -----------------------------------------------------------------------------
-// 5. لعبة سودوكو المصغرة (Mini Sudoku 4x4)
+// 5. لعبة سودوكو المصغرة (Sudoku Mini 4x4)
 // -----------------------------------------------------------------------------
-const SudokuMiniGame = () => {
-  const initialGrid = [
+const SudokuMiniGame = ({ difficulty = 'medium' }) => {
+  const easyGrid = [
+    [1, 2, 3, 0],
+    [3, 4, 0, 2],
+    [4, 0, 2, 1],
+    [0, 1, 4, 3]
+  ];
+  const mediumGrid = [
     [1, 0, 0, 4],
     [0, 4, 1, 0],
     [0, 3, 2, 0],
     [2, 0, 0, 1]
   ];
+  const hardGrid = [
+    [0, 0, 3, 0],
+    [3, 0, 0, 2],
+    [4, 0, 0, 1],
+    [0, 1, 0, 0]
+  ];
+
   const solution = [
     [1, 2, 3, 4],
     [3, 4, 1, 2],
@@ -332,8 +424,15 @@ const SudokuMiniGame = () => {
     [2, 1, 4, 3]
   ];
 
+  const initialGrid = difficulty === 'easy' ? easyGrid : difficulty === 'medium' ? mediumGrid : hardGrid;
+
   const [grid, setGrid] = useState(initialGrid);
   const [resultMsg, setResultMsg] = useState('');
+
+  useEffect(() => {
+    setGrid(initialGrid);
+    setResultMsg('');
+  }, [difficulty]);
 
   const handleChange = (r, c, val) => {
     const num = parseInt(val) || 0;
@@ -379,6 +478,8 @@ const SudokuMiniGame = () => {
 // -----------------------------------------------------------------------------
 export default function EntertainmentHub() {
   const navigate = useNavigate();
+
+  const [selectedDifficulty, setSelectedDifficulty] = useState('medium');
   
   const builtInGames = [
     {
@@ -390,9 +491,9 @@ export default function EntertainmentHub() {
       instructions: [
         'يتناوب اللاعبان في وضع رمز X أو O داخل الشبكة.',
         'الهدف هو تكوين خط مستقيم من 3 رموز متتالية أفقياً أو رأسياً أو قطرياً.',
-        'يمكنك اللعب ضد الذكاء الاصطناعي الذكي أو التحدي مع صديق بجانبك.'
+        'يمكنك اختيار مستوى الصعوبة لتحدي الذكاء الاصطناعي الذكي.'
       ],
-      component: <XOGame />
+      getComponent: (diff) => <XOGame difficulty={diff} />
     },
     {
       id: 'math',
@@ -402,10 +503,10 @@ export default function EntertainmentHub() {
       color: 'from-purple-500 to-pink-600',
       instructions: [
         'تظهر معادلة حسابية سريعة مع 4 اختيارات.',
-        'اختر الإجابة الصحيحة بسرعة لجمع النقاط قبل انتهاء العداد الزمني (30 ثانية).',
-        'الإجابة الصحيحة تمنحك +10 نقاط، والخاطئة تخصم -5 نقاط.'
+        'اختر الإجابة الصحيحة بسرعة لجمع النقاط قبل انتهاء العداد الزمني.',
+        'المستوى الصعب يضيف عمليات ضرب وقسمة وعداداً أسرع.'
       ],
-      component: <MathSpeedGame />
+      getComponent: (diff) => <MathSpeedGame difficulty={diff} />
     },
     {
       id: 'memory',
@@ -416,9 +517,9 @@ export default function EntertainmentHub() {
       instructions: [
         'اضغط على البطاقات لاكتشاف الأشكال المخفية تحتها.',
         'حاول العثور على البطاقتين المتشابهتين متتاليتين لإبقائهما مكشوفتين.',
-        'الهدف هو كشف جميع البطاقات بأقل عدد ممكن من المحاولات.'
+        'يزداد عدد البطاقات بازدياد مستوى الصعوبة.'
       ],
-      component: <MemoryMatchGame />
+      getComponent: (diff) => <MemoryMatchGame difficulty={diff} />
     },
     {
       id: 'words',
@@ -429,22 +530,22 @@ export default function EntertainmentHub() {
       instructions: [
         'تظهر حروف الكلمة مبعثرة مع تلميح بسيط لمفهومها.',
         'اكتب الكلمة الصحيحة كاملة في الصندوق المخصص.',
-        'تحقق من الإجابة للانتقال إلى الكلمة التالية والوصول للنتيجة العالية.'
+        'المستوى الصعب يتضمن مصطلحات علمية طويلة ومعقدة.'
       ],
-      component: <WordScrambleGame />
+      getComponent: (diff) => <WordScrambleGame difficulty={diff} />
     },
     {
       id: 'sudoku',
-      title: '🧩 سودوكو المصغرة (4×4)',
+      title: '🧩 سودوكو المصغرة',
       desc: 'لغز منطقي ممتع لتوزيع الأرقام من 1 إلى 4 بدقة.',
       category: 'منطق',
       color: 'from-cyan-500 to-blue-600',
       instructions: [
         'قم بملء الخانات الفارغة بالأرقام من 1 إلى 4.',
         'يجب ألا يتكرر الرقم نفسه في أي صف أفقي أو عمود رأسي.',
-        'اضغط على "تحقق من الحل" للتأكد من اكتمال اللغز بشكل صحيح.'
+        'المستوى الصعب يترك خانات فارغة أكثر تتطلب تركيزاً أعمق.'
       ],
-      component: <SudokuMiniGame />
+      getComponent: (diff) => <SudokuMiniGame difficulty={diff} />
     }
   ];
 
@@ -462,7 +563,10 @@ export default function EntertainmentHub() {
 
   const handleStartGameClick = (game) => {
     setSelectedGameForInfo(null);
-    setActivePlayGame(game);
+    setActivePlayGame({
+      ...game,
+      renderedComponent: game.getComponent ? game.getComponent(selectedDifficulty) : game.component
+    });
   };
 
   const handleCreateAiGame = async () => {
@@ -521,7 +625,7 @@ export default function EntertainmentHub() {
               <h1 className="text-2xl md:text-4xl font-black dark:text-white flex items-center gap-3">
                 قسم الترفيه وألعاب الذكاء <Gamepad2 className="text-purple-600" />
               </h1>
-              <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">جدد نشاطك الذهني واستمتع بألعاب الذكاء المصممة لتطوير التفكير التنافسي والمنطقي.</p>
+              <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">جدد نشاطك الذهني واستمتع بألعاب الذكاء المصممة بـ 3 مستويات صعوبة لتطوير التفكير المنطقي.</p>
             </div>
           </div>
 
@@ -554,7 +658,7 @@ export default function EntertainmentHub() {
                 </div>
                 
                 <div className="mt-8 pt-4 border-t dark:border-gray-800 flex justify-between items-center text-purple-600 dark:text-purple-400 font-bold text-sm">
-                  <span>تعلمات اللعبة وبدء اللعب</span>
+                  <span>اختيار الصعوبة واللعب</span>
                   <Play size={18} className="group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
@@ -593,7 +697,7 @@ export default function EntertainmentHub() {
       </div>
 
       {/* ----------------------------------------------------------------------- */}
-      {/* 1. نافذة التعليمات وشرح اللعبة قبل البدء (Instructions Modal) */}
+      {/* 1. نافذة التعليمات ومستوى الصعوبة وشرح اللعبة قبل البدء (Instructions Modal) */}
       {/* ----------------------------------------------------------------------- */}
       {selectedGameForInfo && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in">
@@ -610,6 +714,35 @@ export default function EntertainmentHub() {
               <h3 className="text-2xl font-black dark:text-white">{selectedGameForInfo.title}</h3>
               <p className="text-gray-400 text-sm mt-1">{selectedGameForInfo.desc}</p>
             </div>
+
+            {/* محدد مستوى الصعوبة 3 مستويات */}
+            {!selectedGameForInfo.isHtml && (
+              <div className="mb-6 bg-gray-50 dark:bg-[#121212] p-3 rounded-2xl border dark:border-gray-800">
+                <label className="block text-xs font-bold text-gray-500 mb-2 text-center">اختر مستوى الصعوبة (Difficulty Level):</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button 
+                    onClick={() => setSelectedDifficulty('easy')} 
+                    className={`py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1 transition-all ${selectedDifficulty === 'easy' ? 'bg-green-600 text-white shadow-md ring-2 ring-green-500/50' : 'bg-white dark:bg-[#1E1E1E] text-gray-600 dark:text-gray-300 border dark:border-gray-700'}`}
+                  >
+                    <Shield size={14} /> سهل 🟢
+                  </button>
+
+                  <button 
+                    onClick={() => setSelectedDifficulty('medium')} 
+                    className={`py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1 transition-all ${selectedDifficulty === 'medium' ? 'bg-amber-600 text-white shadow-md ring-2 ring-amber-500/50' : 'bg-white dark:bg-[#1E1E1E] text-gray-600 dark:text-gray-300 border dark:border-gray-700'}`}
+                  >
+                    <Award size={14} /> متوسط 🟡
+                  </button>
+
+                  <button 
+                    onClick={() => setSelectedDifficulty('hard')} 
+                    className={`py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center justify-center gap-1 transition-all ${selectedDifficulty === 'hard' ? 'bg-red-600 text-white shadow-md ring-2 ring-red-500/50' : 'bg-white dark:bg-[#1E1E1E] text-gray-600 dark:text-gray-300 border dark:border-gray-700'}`}
+                  >
+                    <Flame size={14} /> صعب 🔴
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="bg-gray-50 dark:bg-[#121212] p-6 rounded-2xl border border-gray-100 dark:border-gray-800 mb-8 space-y-3">
               <h4 className="font-bold text-sm text-gray-500 flex items-center gap-1.5 mb-2">
@@ -646,6 +779,11 @@ export default function EntertainmentHub() {
             <div className="p-6 border-b dark:border-gray-800 flex justify-between items-center bg-gray-50 dark:bg-[#121212]">
               <h3 className="text-xl font-black dark:text-white flex items-center gap-2">
                 <Gamepad2 className="text-blue-600" /> {activePlayGame.title}
+                {!activePlayGame.isHtml && (
+                  <span className="text-xs font-bold px-3 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full">
+                    مستوى: {selectedDifficulty === 'easy' ? 'سهل 🟢' : selectedDifficulty === 'medium' ? 'متوسط 🟡' : 'صعب 🔴'}
+                  </span>
+                )}
               </h3>
               <button onClick={() => setActivePlayGame(null)} className="p-2.5 bg-gray-200 dark:bg-gray-800 hover:bg-red-500 hover:text-white rounded-full transition-colors font-bold text-sm flex items-center gap-1">
                 إغلاق اللعبة <X size={18} />
@@ -662,7 +800,7 @@ export default function EntertainmentHub() {
                 />
               ) : (
                 <div className="w-full max-w-2xl">
-                  {activePlayGame.component}
+                  {activePlayGame.renderedComponent || activePlayGame.component}
                 </div>
               )}
             </div>
