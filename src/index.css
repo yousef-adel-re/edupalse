@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  @apply bg-gray-50 text-gray-900 transition-colors duration-300;
+  overflow-x: hidden; 
+  /* تم إزالة الأوامر التي تسببت في تجميد شاشة الموبايل */
+}
+
+.dark body {
+  @apply bg-darkBg text-gray-100;
+}
+
+/* لمنع شقلبة المعادلات الرياضية */
+.katex, .katex-display {
+  direction: ltr !important;
+  text-align: left !important;
+}
+.katex-display {
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
