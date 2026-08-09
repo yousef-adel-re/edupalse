@@ -212,7 +212,7 @@ CREATE TABLE IF NOT EXISTS public.app_secrets (
 ALTER TABLE public.app_secrets ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Allow read access to app_secrets" ON public.app_secrets;
-CREATE POLICY "Allow read access to app_secrets" ON public.app_secrets FOR SELECT USING (true);
+CREATE POLICY "Allow authenticated read to app_secrets" ON public.app_secrets FOR SELECT TO authenticated USING (true);
 
 -- Seed secrets template in Supabase (replace with your actual API keys in SQL editor or env)
 INSERT INTO public.app_secrets (key_name, key_value) VALUES
